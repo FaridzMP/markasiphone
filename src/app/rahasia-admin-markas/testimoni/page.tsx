@@ -1,281 +1,342 @@
-'use client';
+"use client";
 
-// src/app/rahasia-admin-markas/testimoni/page.tsx
-import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  Star,
+  Check,
+  X,
+  Trash2,
+  ArrowLeft,
+  Clock,
+  CheckCircle,
+  XCircle,
+  List,
+  ImageIcon,
+  User,
+  Mail,
+  Calendar,
+} from "lucide-react";
 
-// ─── types ────────────────────────────────────────────────────────────────────
-
-interface Testimoni {
+type Testimoni = {
   id: number;
   customer_name: string;
   customer_email: string;
-  order_id: number | null;
   rating: number;
   message: string;
   photo_url: string | null;
-  status: 'pending' | 'approved' | 'rejected';
+  status: "pending" | "approved" | "rejected";
   created_at: string;
-}
+};
 
-type FilterStatus = 'all' | 'pending' | 'approved' | 'rejected';
+type FilterStatus = "pending" | "approved" | "rejected" | "all";
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+const STATUS_TABS: { key: FilterStatus; label: string; Icon: React.ElementType }[] = [
+  { key: "pending", label: "Pending", Icon: Clock },
+  { key: "approved", label: "Approved", Icon: CheckCircle },
+  { key: "rejected", label: "Rejected", Icon: XCircle },
+  { key: "all", label: "Semua", Icon: List },
+];
 
-function StarDisplay({ rating }: { rating: number }) {
+function StarRating({ rating }: { rating: number }) {
   return (
     <div className="flex gap-0.5">
       {[1, 2, 3, 4, 5].map((s) => (
-        <svg key={s} className={`w-4 h-4 ${s <= rating ? 'text-yellow-400' : 'text-gray-300'}`}
-          fill="currentColor" viewBox="0 0 20 20">
-          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462
-            c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755
-            1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197
-            -1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588
-            -1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-        </svg>
+        <Star
+          key={s}
+          size={14}
+          className={s <= rating ? "fill-amber-400 text-amber-400" : "fill-white/10 text-white/20"}
+        />
       ))}
     </div>
   );
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  pending:  'bg-yellow-100 text-yellow-800',
-  approved: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-};
-
-// ─── main component ───────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: Testimoni["status"] }) {
+  const map = {
+    pending: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+    approved: "bg-emerald-500/20 text-emerald-300 border-emerald-500/30",
+    rejected: "bg-red-500/20 text-red-300 border-red-500/30",
+  };
+  const labels = { pending: "Pending", approved: "Approved", rejected: "Rejected" };
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${map[status]}`}>
+      {labels[status]}
+    </span>
+  );
+}
 
 export default function AdminTestimoniPage() {
-  const router = useRouter();
+  const [testimoniList, setTestimoniList] = useState<Testimoni[]>([]);
+  const [filter, setFilter] = useState<FilterStatus>("pending");
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [expandedPhoto, setExpandedPhoto] = useState<string | null>(null);
 
-  const [data, setData]         = useState<Testimoni[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [filter, setFilter]     = useState<FilterStatus>('pending');
-  const [toast, setToast]       = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [deletingId, setDeletingId] = useState<number | null>(null);
-
-  // ─── auth check ─────────────────────────────────────────────────────────────
-
+  // Auth check
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const loggedIn = localStorage.getItem('markas_admin_logged_in');
-      if (loggedIn !== 'true') router.replace('/rahasia-admin-markas/login');
-    }
-  }, [router]);
+    const isLogged = localStorage.getItem("markas_admin_logged_in");
+    if (!isLogged) window.location.href = "/rahasia-admin-markas/login";
+  }, []);
 
-  // ─── fetch ───────────────────────────────────────────────────────────────────
+  const showToast = (msg: string, type: "success" | "error" = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
-  const fetchData = useCallback(async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
-      const url = filter === 'all' ? '/api/testimonials' : `/api/testimonials?status=${filter}`;
-      const res  = await fetch(url);
-      const json = await res.json();
-      setData(json.data ?? []);
+      const url = filter === "all" ? "/api/testimonials" : `/api/testimonials?status=${filter}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      setTestimoniList(Array.isArray(data) ? data : data.testimonials ?? []);
     } catch {
-      showToast('error', 'Gagal memuat data');
+      showToast("Gagal memuat data testimoni", "error");
     } finally {
       setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, [filter]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  // ─── actions ─────────────────────────────────────────────────────────────────
-
-  function showToast(type: 'success' | 'error', msg: string) {
-    setToast({ type, msg });
-    setTimeout(() => setToast(null), 3500);
-  }
-
-  async function handleStatus(id: number, status: 'approved' | 'rejected') {
+  const handleAction = async (id: number, status: "approved" | "rejected") => {
     try {
-      const res  = await fetch('/api/testimonials', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/testimonials", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, status }),
       });
-      const json = await res.json();
-      if (json.success) {
-        showToast('success', json.message);
-        fetchData();
-      } else {
-        showToast('error', json.message ?? 'Gagal update');
-      }
+      if (!res.ok) throw new Error();
+      showToast(status === "approved" ? "Testimoni disetujui ✓" : "Testimoni ditolak");
+      fetchData();
     } catch {
-      showToast('error', 'Terjadi kesalahan');
+      showToast("Gagal mengubah status", "error");
     }
-  }
+  };
 
-  async function handleDelete(id: number) {
-    setDeletingId(null);
+  const handleDelete = async (id: number) => {
     try {
-      const res  = await fetch('/api/testimonials', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        showToast('success', 'Testimoni dihapus');
-        fetchData();
-      } else {
-        showToast('error', json.message ?? 'Gagal hapus');
-      }
+      const res = await fetch(`/api/testimonials?id=${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      showToast("Testimoni dihapus");
+      setConfirmDelete(null);
+      fetchData();
     } catch {
-      showToast('error', 'Terjadi kesalahan');
+      showToast("Gagal menghapus", "error");
     }
-  }
+  };
 
-  // ─── counts ──────────────────────────────────────────────────────────────────
-
-  const pendingCount = data.filter(d => d.status === 'pending').length;
-
-  // ─── render ──────────────────────────────────────────────────────────────────
+  const counts = {
+    pending: testimoniList.filter((t) => t.status === "pending").length,
+    total: testimoniList.length,
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen bg-[#0a0a0a] text-white">
       {/* Toast */}
       {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-sm font-medium
-          ${toast.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
+        <div
+          className={`fixed right-6 top-6 z-50 flex items-center gap-3 rounded-2xl border px-5 py-3.5 text-sm font-semibold shadow-2xl backdrop-blur-xl transition-all ${
+            toast.type === "success"
+              ? "border-emerald-500/30 bg-emerald-500/20 text-emerald-300"
+              : "border-red-500/30 bg-red-500/20 text-red-300"
+          }`}
+        >
+          {toast.type === "success" ? <Check size={16} /> : <X size={16} />}
           {toast.msg}
         </div>
       )}
 
-      {/* Modal konfirmasi hapus */}
-      {deletingId !== null && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded-2xl p-6 shadow-xl max-w-sm w-full mx-4">
-            <h3 className="font-semibold text-gray-800 mb-2">Hapus Testimoni?</h3>
-            <p className="text-sm text-gray-500 mb-5">Testimoni akan dihapus permanen dan tidak bisa dikembalikan.</p>
+      {/* Delete Confirm Modal */}
+      {confirmDelete !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-sm rounded-[28px] border border-white/10 bg-[#111] p-7 shadow-2xl">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/20">
+              <Trash2 size={22} className="text-red-400" />
+            </div>
+            <h3 className="mb-2 text-lg font-black">Hapus Testimoni?</h3>
+            <p className="mb-6 text-sm text-white/50">Aksi ini tidak bisa dibatalkan.</p>
             <div className="flex gap-3">
-              <button onClick={() => handleDelete(deletingId)}
-                className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl text-sm font-medium">
-                Ya, Hapus
-              </button>
-              <button onClick={() => setDeletingId(null)}
-                className="flex-1 border border-gray-300 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+              <button
+                onClick={() => setConfirmDelete(null)}
+                className="flex-1 rounded-2xl border border-white/10 bg-white/5 py-3 text-sm font-bold transition hover:bg-white/10"
+              >
                 Batal
+              </button>
+              <button
+                onClick={() => handleDelete(confirmDelete)}
+                className="flex-1 rounded-2xl bg-red-500/80 py-3 text-sm font-bold text-white transition hover:bg-red-500"
+              >
+                Hapus
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Testimoni</h1>
-          <p className="text-sm text-gray-500 mt-0.5">Kelola ulasan dari pelanggan</p>
-        </div>
-        <button onClick={() => router.back()}
-          className="text-sm text-gray-500 hover:text-gray-700 border border-gray-200 px-4 py-2 rounded-xl">
-          ← Kembali
-        </button>
-      </div>
-
-      {/* Filter tabs */}
-      <div className="flex gap-2 mb-6 flex-wrap">
-        {(['pending', 'approved', 'rejected', 'all'] as FilterStatus[]).map((s) => (
-          <button key={s} onClick={() => setFilter(s)}
-            className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors capitalize
-              ${filter === s
-                ? 'bg-blue-600 text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-          >
-            {s === 'all' ? 'Semua' : s}
-            {s === 'pending' && pendingCount > 0 && filter !== 'pending' && (
-              <span className="ml-1.5 bg-red-500 text-white text-xs px-1.5 py-0.5 rounded-full">{pendingCount}</span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Tabel / grid */}
-      {loading ? (
-        <div className="space-y-3">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="bg-white rounded-2xl border border-gray-100 p-5 animate-pulse h-28" />
-          ))}
-        </div>
-      ) : data.length === 0 ? (
-        <div className="text-center py-20">
-          <div className="text-5xl mb-3">📭</div>
-          <p className="text-gray-500">Tidak ada testimoni {filter !== 'all' ? filter : ''}</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {data.map((t) => (
-            <div key={t.id}
-              className="bg-white rounded-2xl border border-gray-100 p-5 shadow-sm flex gap-5"
-            >
-              {/* foto */}
-              {t.photo_url && (
-                <img src={t.photo_url} alt="" className="w-20 h-20 rounded-xl object-cover flex-shrink-0" />
-              )}
-
-              {/* konten */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div>
-                    <p className="font-semibold text-gray-800">{t.customer_name}</p>
-                    <p className="text-xs text-gray-400">{t.customer_email}</p>
-                  </div>
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_BADGE[t.status]}`}>
-                    {t.status}
-                  </span>
-                </div>
-
-                <div className="mt-1.5 mb-2">
-                  <StarDisplay rating={t.rating} />
-                </div>
-
-                <p className="text-sm text-gray-700 leading-relaxed">{t.message}</p>
-
-                <p className="text-xs text-gray-400 mt-2">
-                  {new Date(t.created_at).toLocaleString('id-ID')}
-                  {t.order_id && <span className="ml-2">· Order #{t.order_id}</span>}
-                </p>
-              </div>
-
-              {/* aksi */}
-              <div className="flex flex-col gap-2 flex-shrink-0">
-                {t.status === 'pending' && (
-                  <>
-                    <button onClick={() => handleStatus(t.id, 'approved')}
-                      className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg font-medium">
-                      ✓ Setujui
-                    </button>
-                    <button onClick={() => handleStatus(t.id, 'rejected')}
-                      className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg font-medium">
-                      ✗ Tolak
-                    </button>
-                  </>
-                )}
-                {t.status === 'rejected' && (
-                  <button onClick={() => handleStatus(t.id, 'approved')}
-                    className="text-xs bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded-lg font-medium">
-                    ✓ Setujui
-                  </button>
-                )}
-                {t.status === 'approved' && (
-                  <button onClick={() => handleStatus(t.id, 'rejected')}
-                    className="text-xs bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded-lg font-medium">
-                    ✗ Tolak
-                  </button>
-                )}
-                <button onClick={() => setDeletingId(t.id)}
-                  className="text-xs border border-gray-200 hover:bg-gray-50 text-gray-500 px-3 py-1.5 rounded-lg">
-                  🗑 Hapus
-                </button>
-              </div>
-            </div>
-          ))}
+      {/* Photo Lightbox */}
+      {expandedPhoto && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+          onClick={() => setExpandedPhoto(null)}
+        >
+          <img
+            src={expandedPhoto}
+            alt="Foto testimoni"
+            className="max-h-[80vh] max-w-[90vw] rounded-3xl object-contain shadow-2xl"
+          />
         </div>
       )}
+
+      {/* Header */}
+      <div className="sticky top-0 z-30 border-b border-white/10 bg-[#0a0a0a]/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight">Testimoni</h1>
+            <p className="text-sm text-white/40">Kelola ulasan dari pelanggan</p>
+          </div>
+          <Link
+            href="/rahasia-admin-markas/dashboard"
+            className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <ArrowLeft size={16} />
+            Dashboard
+          </Link>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-6xl px-6 py-8">
+        {/* Filter Tabs */}
+        <div className="mb-8 flex flex-wrap gap-2">
+          {STATUS_TABS.map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`flex items-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-bold transition-all ${
+                filter === key
+                  ? "border-blue-500/50 bg-blue-500/20 text-blue-300"
+                  : "border-white/10 bg-white/5 text-white/50 hover:border-white/20 hover:text-white"
+              }`}
+            >
+              <Icon size={15} />
+              {label}
+              {key === "pending" && counts.pending > 0 && (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-black text-white">
+                  {counts.pending}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Content */}
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-32 text-white/30">
+            <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-blue-400" />
+            <p className="text-sm font-semibold">Memuat testimoni...</p>
+          </div>
+        ) : testimoniList.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-[40px] border border-white/10 bg-white/5 py-32 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-white/10">
+              <Star size={28} className="text-white/30" />
+            </div>
+            <p className="font-bold text-white/40">
+              Tidak ada testimoni{" "}
+              {filter !== "all" ? filter : ""}
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {testimoniList.map((t) => (
+              <div
+                key={t.id}
+                className="group relative flex flex-col rounded-[28px] border border-white/10 bg-white/5 p-5 backdrop-blur-sm transition hover:border-white/20 hover:bg-white/8"
+              >
+                {/* Status Badge */}
+                <div className="mb-4 flex items-center justify-between">
+                  <StatusBadge status={t.status} />
+                  <StarRating rating={t.rating} />
+                </div>
+
+                {/* Message */}
+                <p className="mb-4 flex-1 text-sm leading-relaxed text-white/70">
+                  "{t.message}"
+                </p>
+
+                {/* Photo (jika ada) */}
+                {t.photo_url && (
+                  <button
+                    onClick={() => setExpandedPhoto(t.photo_url!)}
+                    className="mb-4 flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/50 transition hover:border-blue-500/30 hover:text-blue-300"
+                  >
+                    <ImageIcon size={13} />
+                    Lihat foto
+                  </button>
+                )}
+
+                {/* Customer Info */}
+                <div className="mb-5 space-y-1.5 rounded-2xl border border-white/10 bg-black/30 p-3">
+                  <div className="flex items-center gap-2 text-xs text-white/50">
+                    <User size={12} />
+                    <span className="font-semibold text-white/70">{t.customer_name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-white/40">
+                    <Mail size={12} />
+                    {t.customer_email}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-white/30">
+                    <Calendar size={12} />
+                    {new Date(t.created_at).toLocaleDateString("id-ID", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  {t.status !== "approved" && (
+                    <button
+                      onClick={() => handleAction(t.id, "approved")}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500/20 py-2.5 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/30"
+                    >
+                      <Check size={14} />
+                      Setujui
+                    </button>
+                  )}
+                  {t.status !== "rejected" && (
+                    <button
+                      onClick={() => handleAction(t.id, "rejected")}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-amber-500/20 py-2.5 text-xs font-bold text-amber-300 transition hover:bg-amber-500/30"
+                    >
+                      <X size={14} />
+                      Tolak
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setConfirmDelete(t.id)}
+                    className="flex items-center justify-center rounded-2xl bg-red-500/15 px-3 py-2.5 text-red-400 transition hover:bg-red-500/25"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Footer count */}
+        {!loading && testimoniList.length > 0 && (
+          <p className="mt-6 text-center text-xs text-white/25">
+            {testimoniList.length} testimoni ditampilkan
+          </p>
+        )}
+      </div>
     </div>
   );
 }

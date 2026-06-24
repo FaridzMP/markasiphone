@@ -1,344 +1,611 @@
 "use client";
 
+import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
-  ArrowUpRight,
-  Database,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
+import {
+  ShoppingBag,
+  TrendingUp,
+  Package,
+  Wallet,
+  ArrowLeft,
+  RefreshCw,
+  BarChart2,
+  Clock,
+  CheckCircle,
+  Truck,
+  XCircle,
+  Star,
+  Tag,
   Globe,
   ImageIcon,
-  LogOut,
-  Package,
-  ShieldCheck,
-  ShoppingBag,
-  Sparkles,
-  FileText,
-  Wallet,
-  TrendingUp,
-  Clock,
-  CheckCircle2,
-  Loader2,
-  Tag,
-  MessageSquare,
-  ShoppingCart,
 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import ExcelJs from "exceljs";
 
-interface DashboardStats {
+// ─── Types ────────────────────────────────────────────────────────────────────
+type DashboardStats = {
   total_orders: number;
+  total_omset: number;
+  total_products: number;
   pending_orders: number;
-  completed_orders: number;
-  total_revenue: number;
-  activePromos: number;
+};
+
+type Order = {
+  id: number;
+  product: string;
+  total_price: string;
+  status: string;
+  created_at: string;
+};
+
+type KeuanganEntry = {
+  id: number;
+  type: "income" | "expense";
+  amount: number;
+  description: string;
+  created_at: string;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+function getLast7Months() {
+  const result = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    result.push({ year: d.getFullYear(), month: d.getMonth(), label: MONTHS_ID[d.getMonth()] });
+  }
+  return result;
 }
 
-function formatRupiah(angka: number) {
-  if (angka >= 1_000_000_000) return `Rp ${(angka / 1_000_000_000).toFixed(1)}M`;
-  if (angka >= 1_000_000)     return `Rp ${(angka / 1_000_000).toFixed(1)}Jt`;
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency", currency: "IDR", minimumFractionDigits: 0,
-  }).format(angka);
+function parsePrice(raw: string): number {
+  return parseInt(raw.replace(/\D/g, ""), 10) || 0;
 }
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const [stats, setStats]                   = useState<DashboardStats | null>(null);
-  const [loadingStats, setLoadingStats]     = useState(true);
-  const [testimoniPending, setTestimoniPending] = useState<number>(0);
+function formatRp(val: number): string {
+  if (val >= 1_000_000_000) return `Rp ${(val / 1_000_000_000).toFixed(1)}M`;
+  if (val >= 1_000_000) return `Rp ${(val / 1_000_000).toFixed(1)}jt`;
+  if (val >= 1_000) return `Rp ${(val / 1_000).toFixed(0)}rb`;
+  return `Rp ${val}`;
+}
+
+// ─── Custom Tooltip ───────────────────────────────────────────────────────────
+function ChartTooltip({ active, payload, label, isCurrency = true }: {
+  active?: boolean;
+  payload?: { name: string; value: number; color: string }[];
+  label?: string;
+  isCurrency?: boolean;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-2xl border border-white/10 bg-[#111]/95 px-4 py-3 shadow-2xl backdrop-blur-xl">
+      {label && <p className="mb-2 text-xs font-bold text-white/40">{label}</p>}
+      {payload.map((p, i) => (
+        <div key={i} className="flex items-center gap-2 text-sm">
+          <span className="h-2 w-2 rounded-full" style={{ background: p.color }} />
+          <span className="text-white/60">{p.name}:</span>
+          <span className="font-bold text-white">
+            {isCurrency ? formatRp(p.value) : p.value}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+function StatCard({
+  label,
+  value,
+  sub,
+  Icon,
+  accent,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  Icon: React.ElementType;
+  accent: string;
+}) {
+  return (
+    <div className="group relative overflow-hidden rounded-[28px] border border-white/10 bg-white/5 p-6 backdrop-blur-sm transition hover:border-white/20">
+      <div className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-2xl ${accent}`}>
+        <Icon size={20} className="text-white" />
+      </div>
+      <p className="text-xs font-bold uppercase tracking-widest text-white/35">{label}</p>
+      <p className="mt-1 text-3xl font-black tracking-tight text-white">{value}</p>
+      {sub && <p className="mt-1 text-xs text-white/35">{sub}</p>}
+    </div>
+  );
+}
+
+// ─── Chart Card wrapper ───────────────────────────────────────────────────────
+function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[28px] border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+      <div className="mb-5">
+        <p className="text-base font-black text-white">{title}</p>
+        {sub && <p className="mt-0.5 text-xs text-white/35">{sub}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── Status color map ─────────────────────────────────────────────────────────
+const STATUS_COLORS: Record<string, string> = {
+  pending: "#f59e0b",
+  diproses: "#3b82f6",
+  dikirim: "#8b5cf6",
+  selesai: "#10b981",
+  dibatalkan: "#ef4444",
+};
+
+const DONUT_COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ec4899"];
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+export default function AdminDashboardPage() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [keuangan, setKeuangan] = useState<KeuanganEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  // Auth check
+  useEffect(() => {
+    const isLogged = localStorage.getItem("markas_admin_logged_in");
+    if (!isLogged) window.location.href = "/rahasia-admin-markas/login";
+  }, []);
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [statsRes, ordersRes, keuanganRes] = await Promise.all([
+        fetch("/api/dashboard"),
+        fetch("/api/orders"),
+        fetch("/api/keuangan"),
+      ]);
+      const [statsData, ordersData, keuanganData] = await Promise.all([
+        statsRes.json(),
+        ordersRes.json(),
+        keuanganRes.json(),
+      ]);
+
+      setStats(statsData);
+      setOrders(Array.isArray(ordersData) ? ordersData : ordersData.orders ?? []);
+      setKeuangan(Array.isArray(keuanganData) ? keuanganData : keuanganData.data ?? []);
+      setLastUpdated(new Date());
+    } catch (e) {
+      console.error("Gagal fetch data dashboard:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const isLogin = localStorage.getItem("markas_admin_logged_in");
-    if (isLogin !== "true") {
-      router.push("/rahasia-admin-markas/login");
-      return;
-    }
-    fetchStats();
-  }, [router]);
+    fetchAll();
+  }, [fetchAll]);
 
-  const fetchStats = async () => {
-    try {
-      setLoadingStats(true);
-      const res = await fetch("/api/dashboard");
-      if (res.ok) {
-        const data = await res.json();
-        setStats(data);
+  // ── Chart data derivations ──────────────────────────────────────────────────
+
+  // 1. Omset & jumlah order per bulan (7 bulan terakhir)
+  const monthlyData = (() => {
+    const months = getLast7Months();
+    return months.map(({ year, month, label }) => {
+      const monthOrders = orders.filter((o) => {
+        const d = new Date(o.created_at);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
+      const omset = monthOrders.reduce((sum, o) => sum + parsePrice(o.total_price), 0);
+      return { label, omset, jumlah: monthOrders.length };
+    });
+  })();
+
+  // 2. Order per status
+  const statusData = (() => {
+    const STATUS_LIST = ["pending", "diproses", "dikirim", "selesai", "dibatalkan"];
+    return STATUS_LIST.map((s) => ({
+      status: s.charAt(0).toUpperCase() + s.slice(1),
+      jumlah: orders.filter((o) => o.status === s).length,
+      fill: STATUS_COLORS[s],
+    }));
+  })();
+
+  // 3. Income vs Expense per bulan (7 bulan terakhir)
+  const incomeExpenseData = (() => {
+    const months = getLast7Months();
+    return months.map(({ year, month, label }) => {
+      const monthEntries = keuangan.filter((k) => {
+        const d = new Date(k.created_at);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
+      const income = monthEntries.filter((k) => k.type === "income").reduce((s, k) => s + Number(k.amount), 0);
+      const expense = monthEntries.filter((k) => k.type === "expense").reduce((s, k) => s + Number(k.amount), 0);
+      return { label, income, expense };
+    });
+  })();
+
+  // 4. Distribusi produk dari orders (parse product field)
+  const productDistData = (() => {
+    const freq: Record<string, number> = {};
+    orders.forEach((o) => {
+      // product field bisa berupa string nama produk atau JSON
+      let productName = o.product;
+      try {
+        const parsed = JSON.parse(o.product);
+        productName = parsed?.name ?? parsed?.[0]?.name ?? o.product;
+      } catch {
+        // plain string, fine
       }
-    } catch (err) {
-      console.error("Gagal fetch stats:", err);
-    } finally {
-      setLoadingStats(false);
-    }
+      // Ambil kata pertama untuk kategori singkat
+      const key = productName.split(" ").slice(0, 2).join(" ");
+      freq[key] = (freq[key] || 0) + 1;
+    });
+    return Object.entries(freq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([name, value]) => ({ name, value }));
+  })();
 
-    try {
-      const resT  = await fetch('/api/testimonials?status=pending');
-      const dataT = await resT.json();
-      setTestimoniPending((dataT.data ?? []).length);
-    } catch {
-      // silent — tidak kritis
-    }
-  };
+  // ── Top metrics ─────────────────────────────────────────────────────────────
+  const totalOmset = stats?.total_omset ?? orders.reduce((s, o) => s + parsePrice(o.total_price), 0);
+  const selesaiCount = orders.filter((o) => o.status === "selesai").length;
+  const conversionRate = orders.length > 0 ? ((selesaiCount / orders.length) * 100).toFixed(1) : "0";
 
-  const logout = () => {
-    localStorage.removeItem("markas_admin_logged_in");
-    router.push("/rahasia-admin-markas/login");
-  };
-
-  const statCards = [
-    {
-      icon: <ShoppingBag className="text-blue-300" />,
-      label: "Total Pesanan",
-      value: loadingStats ? null : stats?.total_orders ?? 0,
-      suffix: "order",
-    },
-    {
-      icon: <Clock className="text-yellow-300" />,
-      label: "Pending",
-      value: loadingStats ? null : stats?.pending_orders ?? 0,
-      suffix: "order",
-    },
-    {
-      icon: <CheckCircle2 className="text-green-300" />,
-      label: "Selesai",
-      value: loadingStats ? null : stats?.completed_orders ?? 0,
-      suffix: "order",
-    },
-    {
-      icon: <TrendingUp className="text-purple-300" />,
-      label: "Total Omset",
-      value: loadingStats ? null : stats ? formatRupiah(stats.total_revenue) : "Rp 0",
-      isRupiah: true,
-    },
-  ];
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0a0a]">
+        <div className="flex flex-col items-center gap-4 text-white/30">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/10 border-t-blue-400" />
+          <p className="text-sm font-semibold">Memuat dashboard...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-black text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,#2563eb55_0%,transparent_32%),radial-gradient(circle_at_bottom_right,#9333ea55_0%,transparent_32%)]" />
-
-      <section className="relative z-10 mx-auto max-w-7xl px-6 py-10">
-        {/* Header */}
-        <div className="mb-10 flex flex-wrap items-center justify-between gap-5">
+    <div className="min-h-screen bg-[#0a0a0a] text-white">
+      {/* ── Header ── */}
+      <div className="sticky top-0 z-30 border-b border-white/10 bg-[#0a0a0a]/80 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
           <div>
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-2 text-sm font-black text-blue-300 backdrop-blur-xl">
-              <Sparkles size={16} />
-              Private CMS
-            </div>
-            <h1 className="text-5xl font-black tracking-[-0.07em] md:text-6xl">
-              Dashboard CMS.
-            </h1>
-            <p className="mt-4 max-w-xl text-lg text-white/50">
-              Kelola produk, pesanan, keuangan, dan laporan Markas iPhone.
+            <h1 className="text-2xl font-black tracking-tight">Dashboard</h1>
+            <p className="text-sm text-white/40">
+              {lastUpdated
+                ? `Diperbarui ${lastUpdated.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
+                : "Markas iPhone Analytics"}
             </p>
           </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-6 py-3 font-black text-white backdrop-blur-xl transition hover:bg-white/20"
-            >
-              <Globe size={18} />
-              Lihat Website
-            </Link>
+          <div className="flex items-center gap-3">
             <button
-              onClick={logout}
-              className="inline-flex items-center gap-2 rounded-full bg-red-500 px-6 py-3 font-black text-white transition hover:bg-red-600"
+              onClick={fetchAll}
+              className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/60 transition hover:bg-white/10 hover:text-white"
             >
-              <LogOut size={18} />
-              Logout
+              <RefreshCw size={15} />
+              Refresh
             </button>
+            <Link
+              href="/rahasia-admin-markas/orders"
+              className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/70 transition hover:bg-white/10 hover:text-white"
+            >
+              <ArrowLeft size={16} />
+              Menu Admin
+            </Link>
           </div>
         </div>
+      </div>
 
-        {/* Stats Cards */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {statCards.map((card, i) => (
-            <div
-              key={i}
-              className="rounded-[28px] border border-white/10 bg-white/10 p-6 backdrop-blur-2xl"
-            >
-              <div className="mb-3">{card.icon}</div>
-              <p className="text-sm font-bold text-white/40">{card.label}</p>
-              {loadingStats ? (
-                <div className="mt-2 flex items-center gap-2 text-white/40">
-                  <Loader2 size={16} className="animate-spin" />
-                  <span className="text-sm">Loading...</span>
+      <div className="mx-auto max-w-7xl space-y-8 px-6 py-8">
+
+        {/* ── Stat Cards ── */}
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard
+            label="Total Omset"
+            value={formatRp(totalOmset)}
+            sub={`dari ${orders.length} order`}
+            Icon={TrendingUp}
+            accent="bg-gradient-to-br from-blue-500 to-blue-700"
+          />
+          <StatCard
+            label="Total Order"
+            value={String(orders.length)}
+            sub={`${stats?.pending_orders ?? 0} pending`}
+            Icon={ShoppingBag}
+            accent="bg-gradient-to-br from-violet-500 to-violet-700"
+          />
+          <StatCard
+            label="Order Selesai"
+            value={String(selesaiCount)}
+            sub={`Konversi ${conversionRate}%`}
+            Icon={CheckCircle}
+            accent="bg-gradient-to-br from-emerald-500 to-emerald-700"
+          />
+          <StatCard
+            label="Total Produk"
+            value={String(stats?.total_products ?? "–")}
+            sub="aktif di toko"
+            Icon={Package}
+            accent="bg-gradient-to-br from-amber-500 to-orange-600"
+          />
+        </div>
+
+        {/* ── Row 1: Omset Area + Status Bar ── */}
+        <div className="grid gap-6 xl:grid-cols-3">
+          {/* Area Chart — Omset bulanan */}
+          <div className="xl:col-span-2">
+            <ChartCard title="Omset per Bulan" sub="7 bulan terakhir">
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={monthlyData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="gradOmset" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 10 }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(v) => formatRp(v)}
+                    width={68}
+                  />
+                  <Tooltip content={<ChartTooltip isCurrency={true} />} />
+                  <Area
+                    type="monotone"
+                    dataKey="omset"
+                    name="Omset"
+                    stroke="#3b82f6"
+                    strokeWidth={2.5}
+                    fill="url(#gradOmset)"
+                    dot={{ r: 4, fill: "#3b82f6", strokeWidth: 0 }}
+                    activeDot={{ r: 6, fill: "#60a5fa" }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </div>
+
+          {/* Status distribution */}
+          <ChartCard title="Status Order" sub="Distribusi semua order">
+            <div className="space-y-3">
+              {statusData.map((s) => {
+                const max = Math.max(...statusData.map((x) => x.jumlah), 1);
+                const pct = (s.jumlah / max) * 100;
+                return (
+                  <div key={s.status}>
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="font-semibold text-white/60">{s.status}</span>
+                      <span className="font-black text-white">{s.jumlah}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-white/5">
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{ width: `${pct}%`, background: s.fill }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Order status icons summary */}
+            <div className="mt-5 grid grid-cols-3 gap-2">
+              {[
+                { label: "Pending", count: orders.filter(o=>o.status==="pending").length, Icon: Clock, color: "text-amber-400" },
+                { label: "Dikirim", count: orders.filter(o=>o.status==="dikirim").length, Icon: Truck, color: "text-violet-400" },
+                { label: "Batal", count: orders.filter(o=>o.status==="dibatalkan").length, Icon: XCircle, color: "text-red-400" },
+              ].map(({ label, count, Icon, color }) => (
+                <div key={label} className="rounded-2xl border border-white/8 bg-white/5 p-3 text-center">
+                  <Icon size={16} className={`mx-auto mb-1 ${color}`} />
+                  <p className="text-lg font-black text-white">{count}</p>
+                  <p className="text-[10px] text-white/35">{label}</p>
+                </div>
+              ))}
+            </div>
+          </ChartCard>
+        </div>
+
+        {/* ── Row 2: Income vs Expense Line + Product Donut ── */}
+        <div className="grid gap-6 xl:grid-cols-3">
+          {/* Line Chart — Income vs Expense */}
+          <div className="xl:col-span-2">
+            <ChartCard title="Income vs Expense" sub="Dari data keuangan 7 bulan terakhir">
+              {keuangan.length === 0 ? (
+                <div className="flex h-[260px] items-center justify-center text-white/25">
+                  <div className="text-center">
+                    <Wallet size={32} className="mx-auto mb-3 opacity-40" />
+                    <p className="text-sm">Belum ada data keuangan</p>
+                  </div>
                 </div>
               ) : (
-                <h2 className={`mt-1 font-black ${card.isRupiah ? "text-2xl" : "text-4xl"}`}>
-                  {card.value}
-                  {!card.isRupiah && (
-                    <span className="ml-1 text-base font-normal text-white/40">{card.suffix}</span>
-                  )}
-                </h2>
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={incomeExpenseData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+                    <defs>
+                      <filter id="glowIncome">
+                        <feGaussianBlur stdDeviation="2" result="coloredBlur" />
+                        <feMerge><feMergeNode in="coloredBlur" /><feMergeNode in="SourceGraphic" /></feMerge>
+                      </filter>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => formatRp(v)}
+                      width={68}
+                    />
+                    <Tooltip content={<ChartTooltip isCurrency={true} />} />
+                    <Legend
+                      wrapperStyle={{ fontSize: "12px", color: "rgba(255,255,255,0.4)", paddingTop: "12px" }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="income"
+                      name="Income"
+                      stroke="#10b981"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: "#10b981", strokeWidth: 0 }}
+                      activeDot={{ r: 6 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="expense"
+                      name="Expense"
+                      stroke="#ef4444"
+                      strokeWidth={2.5}
+                      strokeDasharray="5 3"
+                      dot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               )}
-            </div>
+            </ChartCard>
+          </div>
+
+          {/* Donut — Produk terlaris */}
+          <ChartCard title="Produk Terlaris" sub="Berdasarkan jumlah order">
+            {productDistData.length === 0 ? (
+              <div className="flex h-[260px] items-center justify-center text-white/25">
+                <div className="text-center">
+                  <BarChart2 size={32} className="mx-auto mb-3 opacity-40" />
+                  <p className="text-sm">Belum ada data order</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie
+                      data={productDistData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={80}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {productDistData.map((_, i) => (
+                        <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const p = payload[0];
+                        return (
+                          <div className="rounded-2xl border border-white/10 bg-[#111]/95 px-4 py-3 text-sm shadow-2xl">
+                            <p className="font-bold text-white">{p.name}</p>
+                            <p className="text-white/50">{p.value} order</p>
+                          </div>
+                        );
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                {/* Legend */}
+                <div className="mt-3 space-y-2">
+                  {productDistData.slice(0, 4).map((d, i) => (
+                    <div key={d.name} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }}
+                        />
+                        <span className="truncate text-white/55 max-w-[110px]">{d.name}</span>
+                      </div>
+                      <span className="font-bold text-white">{d.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </ChartCard>
+        </div>
+
+        {/* ── Row 3: Order Volume Bar Chart ── */}
+        <ChartCard title="Volume Order per Bulan" sub="Jumlah order masuk 7 bulan terakhir">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={monthlyData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradBar" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.9} />
+                  <stop offset="100%" stopColor="#3b82f6" stopOpacity={0.6} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+              <XAxis
+                dataKey="label"
+                tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 11 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fill: "rgba(255,255,255,0.35)", fontSize: 10 }}
+                axisLine={false}
+                tickLine={false}
+                allowDecimals={false}
+              />
+              <Tooltip content={<ChartTooltip isCurrency={false} />} />
+              <Bar dataKey="jumlah" name="Order" fill="url(#gradBar)" radius={[8, 8, 0, 0]} maxBarSize={48} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        {/* ── Quick links ── */}
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {[
+            { href: "/rahasia-admin-markas/orders", label: "Orders", Icon: ShoppingBag, color: "from-blue-500/20 to-blue-600/10 border-blue-500/20" },
+            { href: "/rahasia-admin-markas/produk", label: "Produk", Icon: Package, color: "from-violet-500/20 to-violet-600/10 border-violet-500/20" },
+            { href: "/rahasia-admin-markas/promosi", label: "Promosi", Icon: Tag, color: "from-rose-500/20 to-rose-600/10 border-rose-500/20" }, // Warna Baru: Rose
+            { href: "/rahasia-admin-markas/keuangan", label: "Keuangan", Icon: Wallet, color: "from-emerald-500/20 to-emerald-600/10 border-emerald-500/20" },
+            { href: "/rahasia-admin-markas/laporan", label: "Laporan", Icon: Wallet, color: "from-emerald-500/20 to-emerald-600/10 border-emerald-500/20" },
+            { href: "/rahasia-admin-markas/testimoni", label: "Testimoni", Icon: Star, color: "from-amber-500/20 to-amber-600/10 border-amber-500/20" },
+            { href: "", label: "Banner", Icon: ImageIcon, color: "from-cyan-500/20 to-cyan-600/10 border-cyan-500/20" }, // Warna Baru: Cyan
+            { href: "/", label: "Toko", Icon: Globe, color: "from-fuchsia-500/20 to-fuchsia-600/10 border-fuchsia-500/20" }, // Warna Baru: Fuchsia
+          ].map(({ href, label, Icon, color }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`flex items-center gap-3 rounded-[24px] border bg-gradient-to-br px-5 py-4 font-bold text-white/70 transition hover:text-white ${color}`}
+            >
+              <Icon size={18} />
+              {label}
+            </Link>
           ))}
         </div>
 
-        {/* Info baris bawah */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-3">
-          <div className="rounded-[20px] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-            <Database size={18} className="mb-2 text-blue-300" />
-            <p className="text-sm font-bold text-white/40">Database</p>
-            <p className="font-bold text-white">MySQL • markas_iphone</p>
-          </div>
-          <div className="rounded-[20px] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-            <ShieldCheck size={18} className="mb-2 text-green-300" />
-            <p className="text-sm font-bold text-white/40">Security</p>
-            <p className="font-bold text-white">URL tersembunyi • Login wajib</p>
-          </div>
-          <div className="rounded-[20px] border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-            <TrendingUp size={18} className="mb-2 text-purple-300" />
-            <p className="text-sm font-bold text-white/40">Status</p>
-            <p className="font-bold text-green-400">● Sistem aktif</p>
-          </div>
-        </div>
-
-        {/* Menu Cards */}
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-          {/* Produk */}
-          <Link
-            href="/rahasia-admin-markas/produk"
-            className="group rounded-[40px] border border-white/10 bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition hover:-translate-y-2 hover:bg-white/15"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-500/20 text-blue-300">
-              <Package size={34} />
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em]">Produk</h2>
-              <ArrowUpRight className="transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-            </div>
-            <p className="text-lg leading-8 text-white/50">
-              Tambah, edit, dan hapus produk. Kelola stok dan foto produk.
-            </p>
-          </Link>
-
-          {/* Pesanan */}
-          <Link
-            href="/rahasia-admin-markas/orders"
-            className="group rounded-[40px] border border-white/10 bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition hover:-translate-y-2 hover:bg-white/15"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-yellow-500/20 text-yellow-300">
-              <ShoppingCart size={34} />
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em]">Pesanan</h2>
-              <ArrowUpRight className="transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-            </div>
-            <p className="text-lg leading-8 text-white/50">
-              Pantau dan update status pesanan masuk dari pelanggan.
-            </p>
-          </Link>
-
-          {/* Promosi — FIX: icon + null-safe stats?.activePromos */}
-          <Link
-            href="/rahasia-admin-markas/promosi"
-            className="group rounded-[40px] border border-white/10 bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition hover:-translate-y-2 hover:bg-white/15"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-purple-500/20 text-purple-300">
-              <Tag size={34} />  {/* ← FIX: icon dari lucide, tidak kosong lagi */}
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em]">Promosi</h2>
-              <ArrowUpRight className="transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-            </div>
-            <p className="text-lg leading-8 text-white/50">
-              Atur diskon dan promo produk.{" "}
-              <span className="font-bold text-purple-300">
-                {stats?.activePromos ?? 0} promo aktif {/* ← FIX: null-safe */}
-              </span>
-            </p>
-          </Link>
-
-          {/* Testimoni — FIX: konsisten dengan tema dark glass */}
-          <Link
-            href="/rahasia-admin-markas/testimoni"
-            className="group rounded-[40px] border border-white/10 bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition hover:-translate-y-2 hover:bg-white/15"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-blue-500/20 text-blue-300">
-              <MessageSquare size={34} />
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em]">Testimoni</h2>
-              <div className="flex items-center gap-2">
-                {testimoniPending > 0 && (
-                  <span className="rounded-full bg-red-500 px-2.5 py-1 text-xs font-bold text-white">
-                    {testimoniPending} baru
-                  </span>
-                )}
-                <ArrowUpRight className="transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-              </div>
-            </div>
-            <p className="text-lg leading-8 text-white/50">
-              Approve atau tolak ulasan pelanggan sebelum tampil di website.
-            </p>
-          </Link>
-
-          {/* Keuangan */}
-          <Link
-            href="/rahasia-admin-markas/keuangan"
-            className="group rounded-[40px] border border-white/10 bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition hover:-translate-y-2 hover:bg-white/15"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/20 text-emerald-300">
-              <Wallet size={34} />
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em]">Keuangan</h2>
-              <ArrowUpRight className="transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-            </div>
-            <p className="text-lg leading-8 text-white/50">
-              Kelola modal awal, catat pengeluaran, dan pantau arus kas toko.
-            </p>
-          </Link>
-
-          {/* Laporan */}
-          <Link
-            href="/rahasia-admin-markas/laporan"
-            className="group rounded-[40px] border border-white/10 bg-white/10 p-8 shadow-[0_30px_100px_rgba(0,0,0,0.35)] backdrop-blur-2xl transition hover:-translate-y-2 hover:bg-white/15"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-500/20 text-emerald-300">
-              <FileText size={34} />
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em]">Laporan</h2>
-              <ArrowUpRight className="transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-            </div>
-            <p className="text-lg leading-8 text-white/50">
-              Rekap omset, transaksi, dan export laporan ke Excel.
-            </p>
-          </Link>
-
-          {/* Banner — coming soon */}
-          <div className="rounded-[40px] border border-white/10 bg-white/5 p-8 opacity-60">
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-purple-500/20 text-purple-300">
-              <ImageIcon size={34} />
-            </div>
-            <h2 className="mb-5 text-4xl font-black tracking-[-0.05em]">Banner</h2>
-            <p className="text-lg leading-8 text-white/40">
-              Coming soon — atur hero banner, promo, dan gambar homepage.
-            </p>
-            <span className="mt-4 inline-block rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-white/50">
-              Segera Hadir
-            </span>
-          </div>
-
-          {/* Lihat Toko */}
-          <Link
-            href="/"
-            className="group rounded-[40px] border border-dashed border-white/20 p-8 transition hover:border-white/40 hover:bg-white/5"
-          >
-            <div className="mb-8 flex h-16 w-16 items-center justify-center rounded-3xl bg-white/10 text-white/60">
-              <Globe size={34} />
-            </div>
-            <div className="mb-5 flex items-center justify-between">
-              <h2 className="text-4xl font-black tracking-[-0.05em] text-white/60">Toko</h2>
-              <ArrowUpRight className="text-white/40 transition group-hover:translate-x-1 group-hover:-translate-y-1" />
-            </div>
-            <p className="text-lg leading-8 text-white/30">
-              Lihat tampilan toko dari sisi customer.
-            </p>
-          </Link>
-        </div>
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }

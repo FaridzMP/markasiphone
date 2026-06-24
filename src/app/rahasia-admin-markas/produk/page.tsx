@@ -142,7 +142,7 @@ export default function AdminProdukPage() {
 
   // ── Auth check ──
   useEffect(() => {
-    if (localStorage.getItem("admin_logged_in") !== "true") {
+    if (localStorage.getItem("markas_admin_logged_in") !== "true") {
       router.push("/rahasia-admin-markas/login");
       return;
     }
@@ -181,7 +181,7 @@ export default function AdminProdukPage() {
       setLoadingProducts(true);
       const res  = await fetch("/api/products");
       const data = await res.json();
-      setProducts(Array.isArray(data) ? data : []);
+      setProducts(Array.isArray(data) ? data : (data.products ?? []));
     } catch {
       addToast("Gagal memuat produk", "error");
     } finally {

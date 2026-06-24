@@ -6,6 +6,7 @@ import {
   CreditCard,
   ShieldCheck,
   Sparkles,
+  Star,
   Truck,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,8 +27,17 @@ type DbProduct = {
   created_at: string;
 };
 
+type Testimoni = {
+  id: number;
+  customer_name: string;
+  rating: number;
+  message: string;
+  photo_url: string | null;
+};
+
 export default function Home() {
   const [products, setProducts] = useState<DbProduct[]>([]);
+  const [testimonials, setTestimonials] = useState<Testimoni[]>([]);
 
   useEffect(() => {
     fetch("/api/products")
@@ -38,7 +48,6 @@ export default function Home() {
           setProducts([]);
           return;
         }
-        // Handle both { products: [...] } and direct array
         const list = Array.isArray(data) ? data : (data.products ?? []);
         setProducts(list);
       })
@@ -48,10 +57,22 @@ export default function Home() {
       });
   }, []);
 
+  // Fetch 3 approved testimoni untuk preview di homepage
+  useEffect(() => {
+    fetch("/api/testimonials?status=approved")
+      .then((res) => res.json())
+      .then((data) => {
+        const list: Testimoni[] = Array.isArray(data) ? data : (data.testimonials ?? []);
+        setTestimonials(list.slice(0, 3));
+      })
+      .catch(() => setTestimonials([]));
+  }, []);
+
   return (
     <main className="min-h-screen overflow-hidden bg-black text-white">
       <Navbar />
 
+      {/* ── Hero ───────────────────────────────────────────────────────────── */}
       <section className="relative min-h-screen overflow-hidden bg-black">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,#2563eb55_0%,transparent_32%),radial-gradient(circle_at_80%_10%,#9333ea55_0%,transparent_28%),radial-gradient(circle_at_50%_90%,#06b6d455_0%,transparent_32%)]" />
         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent,black_85%)]" />
@@ -118,6 +139,7 @@ export default function Home() {
         </motion.div>
       </section>
 
+      {/* ── Feature Badges ─────────────────────────────────────────────────── */}
       <section className="relative z-10 -mt-24 px-6 pb-20">
         <div className="mx-auto grid max-w-7xl gap-5 rounded-[40px] border border-white/10 bg-white/10 p-5 shadow-2xl backdrop-blur-2xl md:grid-cols-3">
           <div className="rounded-[32px] bg-white/10 p-7 backdrop-blur-xl">
@@ -140,6 +162,7 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ── Products ───────────────────────────────────────────────────────── */}
       <section id="produk" className="bg-[#f5f5f7] px-6 py-24 text-black">
         <div className="mx-auto max-w-7xl">
           <div className="mb-14 text-center">
@@ -191,6 +214,85 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ── Testimonials Preview ───────────────────────────────────────────── */}
+      <section id="testimoni" className="bg-black px-6 py-24 text-white">
+        <div className="mx-auto max-w-7xl">
+          {/* Section header */}
+          <div className="mb-14 text-center">
+            <p className="mb-3 text-sm font-black uppercase tracking-[0.35em] text-blue-400">
+              Kata Mereka
+            </p>
+            <h2 className="text-5xl font-black tracking-[-0.06em] md:text-7xl">
+              Testimoni
+              <span className="block bg-gradient-to-r from-blue-300 to-purple-300 bg-clip-text text-transparent">
+                Pelanggan.
+              </span>
+            </h2>
+            <p className="mx-auto mt-5 max-w-xl text-lg text-white/50">
+              Pengalaman nyata dari pelanggan setia Markas iPhone.
+            </p>
+          </div>
+
+          {/* Testimoni preview cards */}
+          {testimonials.length > 0 ? (
+            <div className="mb-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {testimonials.map((t, i) => (
+                <motion.div
+                  key={t.id}
+                  initial={{ opacity: 0, y: 24 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, delay: i * 0.1 }}
+                  viewport={{ once: true }}
+                  className="rounded-[28px] border border-white/10 bg-white/5 p-6 backdrop-blur-sm"
+                >
+                  {/* Stars */}
+                  <div className="mb-4 flex gap-0.5">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Star
+                        key={s}
+                        size={15}
+                        className={
+                          s <= t.rating
+                            ? "fill-amber-400 text-amber-400"
+                            : "fill-white/10 text-white/20"
+                        }
+                      />
+                    ))}
+                  </div>
+                  {/* Message */}
+                  <p className="mb-5 text-sm leading-relaxed text-white/65">
+                    &ldquo;{t.message}&rdquo;
+                  </p>
+                  {/* Name */}
+                  <p className="text-sm font-bold text-white/80">— {t.customer_name}</p>
+                </motion.div>
+              ))}
+            </div>
+          ) : (
+            <div className="mb-10 rounded-[32px] border border-white/10 bg-white/5 py-16 text-center">
+              <Star size={32} className="mx-auto mb-3 text-white/20" />
+              <p className="text-white/40">Belum ada testimoni tersedia.</p>
+            </div>
+          )}
+
+          {/* CTA button */}
+          <div className="text-center">
+            <Link
+              href="/testimoni"
+              className="group inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/10 px-8 py-4 font-black text-white backdrop-blur-xl transition-all duration-300 hover:border-blue-500/40 hover:bg-blue-500/15 hover:shadow-[0_0_40px_rgba(59,130,246,0.2)]"
+            >
+              <Star size={18} className="text-amber-400" />
+              Lihat Semua Testimoni Pelanggan
+              <ArrowRight
+                size={17}
+                className="transition-transform duration-300 group-hover:translate-x-1"
+              />
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Experience Section ─────────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-black px-6 py-28 text-white">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,#2563eb55_0%,transparent_35%),radial-gradient(circle_at_80%_60%,#9333ea55_0%,transparent_35%)]" />
 

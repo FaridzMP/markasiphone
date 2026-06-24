@@ -1,338 +1,350 @@
 "use client";
 
-import {
-  ArrowLeft,
-  CheckCircle2,
-  Clock,
-  Download,
-  Loader2,
-  Receipt,
-  RefreshCw,
-  TrendingDown,
-  TrendingUp,
-  Wallet,
-} from "lucide-react";
-import Link from "next/link";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  LineChart, Line, PieChart, Pie, Cell, Legend,
+} from "recharts";
+import {
+  Download, FileSpreadsheet, TrendingUp, TrendingDown,
+  Package, ShoppingCart, DollarSign, AlertCircle, RefreshCw,
+} from "lucide-react";
+import ExcelJs from "exceljs";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type OrderStatus = "pending" | "diproses" | "dikirim" | "selesai" | "dibatalkan";
-
-type OrderReport = {
-  id: number;
-  customer_name: string;
-  product: string;
-  total_price: string;
-  status: OrderStatus;
-  created_at: string;
-};
-
-type KeuanganSummary = {
-  income: number;
-  expense: number;
-  profit: number;
+// ─── Tipe ─────────────────────────────────────────────────────────────────────
+interface ReportData {
+  totalOrders: number;
+  totalRevenue: number;
+  totalExpense: number;
+  netProfit: number;
   totalModal: number;
+  ordersByStatus: { status: string; count: number }[];
+  revenueByMonth: { month: string; revenue: number; orders: number }[];
+  topProducts: { name: string; count: number; revenue: number }[];
+  totalProducts: number;
+  lowStockProducts: number;
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  pending:    "#F59E0B",
+  diproses:   "#3B82F6",
+  dikirim:    "#8B5CF6",
+  selesai:    "#10B981",
+  dibatalkan: "#EF4444",
 };
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+const CHART_COLORS = ["#6366F1", "#8B5CF6", "#EC4899", "#10B981", "#F59E0B"];
 
-const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: string }> = {
-  pending:    { label: "Pending",    color: "text-yellow-300", bg: "bg-yellow-500/15" },
-  diproses:   { label: "Diproses",   color: "text-blue-300",   bg: "bg-blue-500/15" },
-  dikirim:    { label: "Dikirim",    color: "text-purple-300", bg: "bg-purple-500/15" },
-  selesai:    { label: "Selesai",    color: "text-green-300",  bg: "bg-green-500/15" },
-  dibatalkan: { label: "Dibatalkan", color: "text-red-300",    bg: "bg-red-500/15" },
-};
-
-const STATUS_FILTERS = [
-  { key: "all",       label: "Semua" },
-  { key: "selesai",   label: "Selesai" },
-  { key: "pending",   label: "Pending" },
-  { key: "diproses",  label: "Diproses" },
-  { key: "dikirim",   label: "Dikirim" },
-] as const;
-
-const PAGE_SIZE = 10;
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function parsePrice(price: string): number {
-  return Number(String(price).replace(/[^\d]/g, "") || 0);
+function formatRupiah(num: number) {
+  if (num >= 1_000_000_000) return `Rp ${(num / 1_000_000_000).toFixed(1)}M`;
+  if (num >= 1_000_000)     return `Rp ${(num / 1_000_000).toFixed(1)}Jt`;
+  if (num >= 1_000)         return `Rp ${(num / 1_000).toFixed(0)}rb`;
+  return `Rp ${num.toLocaleString("id-ID")}`;
 }
 
-function rupiah(n: number) {
-  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", minimumFractionDigits: 0 }).format(n);
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString("id-ID", {
-    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-  });
-}
-
-function exportToCSV(reports: OrderReport[]) {
-  const header = "Invoice,Customer,Produk,Total,Status,Tanggal";
-  const rows = reports.map((r) =>
-    `#${r.id},"${r.customer_name}","${r.product}",${r.total_price},${STATUS_CONFIG[r.status]?.label ?? r.status},${formatDate(r.created_at)}`
+// ─── Komponen KPI Card ────────────────────────────────────────────────────────
+function KPICard({
+  title, value, icon: Icon, trend, color,
+}: {
+  title: string; value: string; icon: React.ElementType; trend?: "up"|"down"|"neutral"; color: string;
+}) {
+  return (
+    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[20px] p-5 flex items-center gap-4 hover:bg-white/8 transition-all">
+      <div className={`w-12 h-12 rounded-[14px] flex items-center justify-center ${color}`}>
+        <Icon size={22} className="text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-white/50 font-medium uppercase tracking-wider truncate">{title}</p>
+        <p className="text-xl font-bold text-white mt-0.5">{value}</p>
+      </div>
+      {trend && (
+        <div className={`flex items-center gap-1 text-xs font-semibold ${
+          trend === "up" ? "text-emerald-400" : trend === "down" ? "text-red-400" : "text-yellow-400"
+        }`}>
+          {trend === "up" ? <TrendingUp size={14}/> : trend === "down" ? <TrendingDown size={14}/> : <AlertCircle size={14}/>}
+        </div>
+      )}
+    </div>
   );
-  const csv  = [header, ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href     = url;
-  a.download = `laporan-pesanan-markas-iphone-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
-
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function LaporanPage() {
   const router = useRouter();
+  const [data, setData]           = useState<ReportData | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportMsg, setExportMsg] = useState("");
 
-  const [reports, setReports]           = useState<OrderReport[]>([]);
-  const [keuangan, setKeuangan]         = useState<KeuanganSummary | null>(null);
-  const [loading, setLoading]           = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-
-  // ── Auth check ──
   useEffect(() => {
-    if (localStorage.getItem("admin__in") !== "true") {
-      router.push("/rahasia-admin-markas/login");
-      return;
+    if (typeof window !== "undefined") {
+      const logged = localStorage.getItem("markas_admin_logged_in");
+      if (!logged) router.push("/rahasia-admin-markas/login");
     }
-    fetchAll();
   }, [router]);
 
-  async function fetchAll() {
+  const fetchData = async () => {
     setLoading(true);
-    await Promise.all([fetchReports(), fetchKeuangan()]);
-    setLoading(false);
-  }
-
-  async function fetchReports() {
     try {
-      const res  = await fetch("/api/reports");
-      const data = await res.json();
-      setReports(Array.isArray(data) ? data : []);
-    } catch {
-      setReports([]);
+      const res = await fetch("/api/reports?admin=true", {
+        headers: { "x-admin-request": "true" },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        setData(json);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  async function fetchKeuangan() {
+  useEffect(() => { fetchData(); }, []);
+
+  // ── Export Excel ──
+  const handleExportExcel = async () => {
+    setExporting(true);
+    setExportMsg("⏳ Menyiapkan laporan...");
     try {
-      const res  = await fetch("/api/keuangan");
-      const data = await res.json();
-      setKeuangan(data);
-    } catch {
-      setKeuangan(null);
+      const res = await fetch("/api/laporan/export?admin=true", {
+        headers: { "x-admin-request": "true" },
+      });
+      if (!res.ok) throw new Error("Gagal export");
+
+      const blob    = await res.blob();
+      const url     = URL.createObjectURL(blob);
+      const link    = document.createElement("a");
+      const now     = new Date().toISOString().slice(0, 10);
+      link.href     = url;
+      link.download = `Laporan_MarkasiPhone_${now}.xlsx`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setExportMsg("✅ Berhasil diunduh!");
+    } catch (err) {
+      setExportMsg("❌ Gagal export. Coba lagi.");
+    } finally {
+      setExporting(false);
+      setTimeout(() => setExportMsg(""), 4000);
     }
+  };
+
+  // ─── Loading state ─────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-white/60 text-sm">Memuat laporan...</p>
+        </div>
+      </div>
+    );
   }
 
-  // ── Derived data ──
-  const completedOrders = reports.filter((r) => r.status === "selesai");
-  const pendingOrders    = reports.filter((r) => r.status === "pending");
-  const totalOmsetOrders = completedOrders.reduce((sum, r) => sum + parsePrice(r.total_price), 0);
-
-  const filteredReports = statusFilter === "all"
-    ? reports
-    : reports.filter((r) => r.status === statusFilter);
-
-  const visibleReports = filteredReports.slice(0, visibleCount);
-  const hasMore        = filteredReports.length > visibleCount;
-
-  // Profit yang AKURAT diambil dari modul Keuangan (omset - modal - pengeluaran)
-  // bukan disamakan dengan omset seperti versi sebelumnya
-  const profitBersih = keuangan?.profit ?? null;
+  const netProfitTrend = !data ? "neutral" : data.netProfit > 0 ? "up" : data.netProfit < 0 ? "down" : "neutral";
 
   return (
-    <main className="min-h-screen overflow-hidden bg-black p-6 text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,#2563eb44_0%,transparent_40%),radial-gradient(circle_at_bottom_right,#9333ea44_0%,transparent_40%)]" />
-
-      <section className="relative z-10 mx-auto max-w-7xl">
+    <div className="min-h-screen bg-[#0a0a0a] p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
 
         {/* ── Header ── */}
-        <Link
-          href="/rahasia-admin-markas/dashboard"
-          className="mb-8 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-5 py-2.5 text-sm font-bold text-white/70 backdrop-blur-xl transition hover:text-white"
-        >
-          <ArrowLeft size={15} /> Dashboard
-        </Link>
-
-        <div className="mb-10 flex flex-wrap items-start justify-between gap-5">
+        <div className="flex items-center justify-between flex-wrap gap-4">
           <div>
-            <p className="mb-2 text-xs font-black uppercase tracking-[0.3em] text-blue-300">Financial Report</p>
-            <h1 className="text-5xl font-black tracking-[-0.06em] md:text-6xl">Laporan.</h1>
-            <p className="mt-3 text-base text-white/50">Rekap omset, pesanan, dan transaksi toko.</p>
+            <h1 className="text-2xl font-bold text-white flex items-center gap-3">
+              <span className="text-2xl">📊</span> Laporan Bisnis
+            </h1>
+            <p className="text-white/40 text-sm mt-1">
+              Data real-time dari database · {new Date().toLocaleDateString("id-ID", { weekday:"long", year:"numeric", month:"long", day:"numeric" })}
+            </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            {/* Refresh */}
             <button
-              onClick={fetchAll}
+              onClick={fetchData}
               disabled={loading}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-5 py-3 font-bold text-white backdrop-blur-xl transition hover:bg-white/20 disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2.5 bg-white/10 hover:bg-white/15 border border-white/10 rounded-[12px] text-white/70 text-sm font-medium transition-all"
             >
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
               Refresh
             </button>
+
+            {/* Export Excel — tombol utama */}
             <button
-              onClick={() => exportToCSV(reports)}
-              disabled={reports.length === 0}
-              className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-5 py-3 font-bold text-white transition hover:bg-blue-700 disabled:opacity-40"
+              onClick={handleExportExcel}
+              disabled={exporting}
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 rounded-[12px] text-white text-sm font-semibold shadow-lg shadow-indigo-500/25 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <Download size={16} />
-              Export CSV
+              {exporting ? (
+                <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              ) : (
+                <FileSpreadsheet size={16} />
+              )}
+              {exporting ? "Generating..." : "Export Excel"}
+              {!exporting && <Download size={14} className="opacity-70" />}
             </button>
           </div>
         </div>
 
-        {/* ── Summary cards ── */}
-        <div className="mb-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-[28px] border border-white/10 bg-white/10 p-6 backdrop-blur-2xl">
-            <Wallet size={20} className="mb-4 text-blue-300" />
-            <p className="text-xs font-bold text-white/45">Omset (Pesanan Selesai)</p>
-            {loading
-              ? <div className="mt-2 h-8 w-32 animate-pulse rounded-lg bg-white/10" />
-              : <h2 className="mt-1 text-2xl font-black">{rupiah(totalOmsetOrders)}</h2>}
-          </div>
-
-          <div className="rounded-[28px] border border-green-500/20 bg-green-500/10 p-6">
-            <CheckCircle2 size={20} className="mb-4 text-green-300" />
-            <p className="text-xs font-bold text-green-300/80">Transaksi Selesai</p>
-            {loading
-              ? <div className="mt-2 h-8 w-16 animate-pulse rounded-lg bg-white/10" />
-              : <h2 className="mt-1 text-2xl font-black">{completedOrders.length}</h2>}
-          </div>
-
-          <div className="rounded-[28px] border border-yellow-500/20 bg-yellow-500/10 p-6">
-            <Clock size={20} className="mb-4 text-yellow-300" />
-            <p className="text-xs font-bold text-yellow-300/80">Pending</p>
-            {loading
-              ? <div className="mt-2 h-8 w-16 animate-pulse rounded-lg bg-white/10" />
-              : <h2 className="mt-1 text-2xl font-black">{pendingOrders.length}</h2>}
-          </div>
-
-          <div className="rounded-[28px] border border-purple-500/20 bg-purple-500/10 p-6">
-            <TrendingUp size={20} className="mb-4 text-purple-300" />
-            <p className="text-xs font-bold text-purple-300/80">Profit Bersih</p>
-            {loading ? (
-              <div className="mt-2 h-8 w-32 animate-pulse rounded-lg bg-white/10" />
-            ) : profitBersih === null ? (
-              <p className="mt-1 text-sm text-white/30">Data keuangan belum tersedia</p>
-            ) : (
-              <h2 className={`mt-1 text-2xl font-black ${profitBersih < 0 ? "text-red-300" : ""}`}>
-                {rupiah(profitBersih)}
-              </h2>
-            )}
-          </div>
-        </div>
-
-        {/* Penjelasan profit — supaya tidak disalahartikan sebagai omset */}
-        {!loading && keuangan && (
-          <div className="mb-8 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3 text-sm text-white/50">
-            <TrendingDown size={14} className="text-white/30" />
-            Profit bersih dihitung dari modul Keuangan: omset dikurangi modal ({rupiah(keuangan.totalModal)}) dan pengeluaran ({rupiah(keuangan.expense)}).
-            <Link href="/rahasia-admin-markas/keuangan" className="font-bold text-blue-300 hover:underline">
-              Lihat detail →
-            </Link>
+        {/* Feedback export */}
+        {exportMsg && (
+          <div className={`px-4 py-3 rounded-[12px] text-sm font-medium border ${
+            exportMsg.startsWith("✅")
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+              : exportMsg.startsWith("❌")
+              ? "bg-red-500/10 border-red-500/30 text-red-400"
+              : "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
+          }`}>
+            {exportMsg}
           </div>
         )}
 
-        {/* ── Status filter ── */}
-        <div className="mb-6 flex flex-wrap gap-2">
-          {STATUS_FILTERS.map((f) => {
-            const count = f.key === "all" ? reports.length : reports.filter((r) => r.status === f.key).length;
-            return (
-              <button
-                key={f.key}
-                onClick={() => { setStatusFilter(f.key); setVisibleCount(PAGE_SIZE); }}
-                className={`rounded-full border px-4 py-2 text-sm font-bold transition ${
-                  statusFilter === f.key
-                    ? "border-blue-500 bg-blue-600 text-white"
-                    : "border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white"
-                }`}
-              >
-                {f.label}
-                <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-black ${
-                  statusFilter === f.key ? "bg-white/20" : "bg-white/10"
-                }`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ── Transaction list ── */}
-        <div className="rounded-[40px] border border-white/10 bg-white/[0.06] p-7 backdrop-blur-2xl">
-          <div className="mb-6 flex items-center justify-between">
-            <h2 className="text-2xl font-black tracking-tight">Riwayat Transaksi</h2>
-            <span className="text-sm text-white/40">{filteredReports.length} pesanan</span>
+        {/* ── KPI Grid ── */}
+        {data && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPICard title="Total Order"     value={data.totalOrders.toLocaleString("id-ID")} icon={ShoppingCart} color="bg-indigo-500"  trend="neutral" />
+            <KPICard title="Total Produk"    value={data.totalProducts.toLocaleString("id-ID")} icon={Package}    color="bg-purple-500"  trend="neutral" />
+            <KPICard title="Total Pemasukan" value={formatRupiah(data.totalRevenue)}             icon={TrendingUp} color="bg-emerald-500" trend="up" />
+            <KPICard title="Laba Bersih"     value={formatRupiah(data.netProfit)}                icon={DollarSign} color={data.netProfit >= 0 ? "bg-emerald-600" : "bg-red-600"} trend={netProfitTrend} />
           </div>
+        )}
 
-          {/* Loading */}
-          {loading && (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => <div key={i} className="h-20 animate-pulse rounded-[24px] bg-white/5" />)}
+        {/* ── Charts Row ── */}
+        {data && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            {/* Revenue by month */}
+            <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-[20px] p-5">
+              <h2 className="text-sm font-semibold text-white/80 mb-4 flex items-center gap-2">
+                <TrendingUp size={15} className="text-indigo-400" /> Tren Pendapatan & Order per Bulan
+              </h2>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={data.revenueByMonth}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" />
+                  <XAxis dataKey="month" tick={{ fill: "#ffffff60", fontSize: 11 }} />
+                  <YAxis yAxisId="left"  tick={{ fill: "#ffffff60", fontSize: 10 }} tickFormatter={v => formatRupiah(v)} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fill: "#ffffff60", fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ background: "#1e1b4b", border: "1px solid #ffffff20", borderRadius: 12, color: "#fff", fontSize: 12 }}
+                    formatter={(val, name) => [
+                      name === "revenue" ? formatRupiah(Number(val ?? 0)) : Number(val ?? 0),
+                      name === "revenue" ? "Pendapatan" : "Order",
+                    ]}
+                  />
+                  <Line yAxisId="left"  type="monotone" dataKey="revenue" stroke="#6366F1" strokeWidth={2} dot={{ fill: "#6366F1", r: 3 }} />
+                  <Line yAxisId="right" type="monotone" dataKey="orders"  stroke="#10B981" strokeWidth={2} dot={{ fill: "#10B981", r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
-          )}
 
-          {/* Empty */}
-          {!loading && filteredReports.length === 0 && (
-            <div className="rounded-2xl bg-white/5 p-12 text-center">
-              <Receipt size={40} className="mx-auto mb-3 text-white/20" />
-              <p className="font-bold text-white/40">
-                {statusFilter === "all" ? "Belum ada transaksi" : "Tidak ada transaksi dengan status ini"}
-              </p>
-            </div>
-          )}
-
-          {/* List */}
-          {!loading && visibleReports.length > 0 && (
-            <div className="space-y-3">
-              {visibleReports.map((item) => {
-                const sc = STATUS_CONFIG[item.status] ?? STATUS_CONFIG.pending;
-                return (
-                  <div
-                    key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-4 rounded-[24px] border border-white/5 bg-black/20 p-5"
+            {/* Status pie */}
+            <div className="bg-white/5 border border-white/10 rounded-[20px] p-5">
+              <h2 className="text-sm font-semibold text-white/80 mb-4 flex items-center gap-2">
+                <ShoppingCart size={15} className="text-purple-400" /> Status Order
+              </h2>
+              <ResponsiveContainer width="100%" height={180}>
+                <PieChart>
+                  <Pie
+                    data={data.ordersByStatus}
+                    dataKey="count"
+                    nameKey="status"
+                    cx="50%" cy="50%"
+                    outerRadius={75}
+                    paddingAngle={3}
                   >
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-300/80">
-                        Invoice #{item.id}
-                      </p>
-                      <h3 className="mt-1 text-xl font-black">{item.customer_name}</h3>
-                      <p className="mt-0.5 text-sm text-white/45">{item.product}</p>
-                      <p className="mt-1 text-xs text-white/30">{formatDate(item.created_at)}</p>
-                    </div>
-
-                    <div className="text-right">
-                      <span className={`inline-block rounded-full px-3 py-1 text-xs font-black ${sc.bg} ${sc.color}`}>
-                        {sc.label}
-                      </span>
-                      <p className="mt-2 text-xl font-black">{item.total_price}</p>
-                    </div>
-                  </div>
-                );
-              })}
+                    {data.ordersByStatus.map((entry) => (
+                      <Cell key={entry.status} fill={STATUS_COLORS[entry.status] ?? "#94A3B8"} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ background: "#1e1b4b", border: "1px solid #ffffff20", borderRadius: 12, color: "#fff", fontSize: 12 }}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: 11, color: "#ffffff80" }}
+                    formatter={(value) => value}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Load more */}
-          {!loading && hasMore && (
-            <button
-              onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 py-3.5 font-bold text-white/70 transition hover:bg-white/10"
-            >
-              Tampilkan {Math.min(PAGE_SIZE, filteredReports.length - visibleCount)} lagi
-            </button>
-          )}
+        {/* ── Top Products & Keuangan ── */}
+        {data && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            {/* Top produk */}
+            <div className="bg-white/5 border border-white/10 rounded-[20px] p-5">
+              <h2 className="text-sm font-semibold text-white/80 mb-4 flex items-center gap-2">
+                <Package size={15} className="text-yellow-400" /> Produk Terlaris
+              </h2>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={data.topProducts} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" horizontal={false} />
+                  <XAxis type="number" tick={{ fill: "#ffffff60", fontSize: 10 }} />
+                  <YAxis dataKey="name" type="category" tick={{ fill: "#ffffff80", fontSize: 10 }} width={120} />
+                  <Tooltip
+                    contentStyle={{ background: "#1e1b4b", border: "1px solid #ffffff20", borderRadius: 12, color: "#fff", fontSize: 12 }}
+                    formatter={(val) => [Number(val ?? 0), "Order"]}
+                  />
+                  <Bar dataKey="count" radius={[0, 6, 6, 0]}>
+                    {data.topProducts.map((_, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Ringkasan keuangan */}
+            <div className="bg-white/5 border border-white/10 rounded-[20px] p-5">
+              <h2 className="text-sm font-semibold text-white/80 mb-4 flex items-center gap-2">
+                <DollarSign size={15} className="text-emerald-400" /> Ringkasan Keuangan
+              </h2>
+              <div className="space-y-3">
+                {[
+                  { label: "Modal Toko",      val: data.totalModal,   color: "text-blue-400",    bg: "bg-blue-500/10"    },
+                  { label: "Total Pemasukan", val: data.totalRevenue, color: "text-emerald-400", bg: "bg-emerald-500/10" },
+                  { label: "Total Pengeluaran", val: data.totalExpense, color: "text-red-400",   bg: "bg-red-500/10"     },
+                  { label: "Laba Bersih",     val: data.netProfit,    color: data.netProfit >= 0 ? "text-emerald-400" : "text-red-400", bg: data.netProfit >= 0 ? "bg-emerald-500/10" : "bg-red-500/10" },
+                ].map((item) => (
+                  <div key={item.label} className={`flex items-center justify-between px-4 py-2.5 ${item.bg} rounded-[12px]`}>
+                    <span className="text-white/60 text-sm">{item.label}</span>
+                    <span className={`font-bold text-sm ${item.color}`}>
+                      {Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(item.val)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {data.lowStockProducts > 0 && (
+                <div className="mt-4 flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 rounded-[12px] px-4 py-3">
+                  <AlertCircle size={15} className="text-yellow-400 shrink-0" />
+                  <p className="text-yellow-300 text-xs font-medium">
+                    {data.lowStockProducts} produk stok hampir habis (≤ 5)
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Info export ── */}
+        <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-[16px] p-4 flex items-start gap-3">
+          <FileSpreadsheet size={18} className="text-indigo-400 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-indigo-300 text-sm font-semibold mb-1">File Excel yang akan diunduh berisi 4 sheet:</p>
+            <p className="text-white/50 text-xs leading-relaxed">
+              <strong className="text-white/70">📊 Ringkasan</strong> — KPI utama & breakdown status ·{" "}
+              <strong className="text-white/70">📦 Data Orders</strong> — semua order dengan filter & total otomatis ·{" "}
+              <strong className="text-white/70">💰 Keuangan</strong> — rincian income/expense + laba bersih ·{" "}
+              <strong className="text-white/70">🛍️ Produk</strong> — katalog lengkap dengan info diskon & stok
+            </p>
+          </div>
         </div>
-      </section>
-    </main>
+
+      </div>
+    </div>
   );
 }

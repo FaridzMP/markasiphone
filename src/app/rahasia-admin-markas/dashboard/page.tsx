@@ -185,7 +185,7 @@ export default function AdminDashboardPage() {
     try {
       const [statsRes, ordersRes, keuanganRes] = await Promise.all([
         fetch("/api/dashboard"),
-        fetch("/api/orders", {
+        fetch("/api/orders?limit=1000", {
           headers: {"x-admin-request": "true"}
         }),
         fetch("/api/keuangan", {
@@ -199,7 +199,12 @@ export default function AdminDashboardPage() {
       ]);
 
       setStats(statsData);
-      setOrders(Array.isArray(ordersData) ? ordersData : ordersData.orders ?? []);
+      
+      const orderList = Array.isArray(ordersData)
+        ? ordersData
+        : (ordersData.data ?? []);
+      setOrders(orderList);
+
       setKeuangan(Array.isArray(keuanganData) ? keuanganData : keuanganData.data ?? []);
       setLastUpdated(new Date());
     } catch (e) {

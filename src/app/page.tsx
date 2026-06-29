@@ -10,6 +10,8 @@ import {
   Star,
   Truck,
   X,
+  Sun,
+  Moon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -47,6 +49,24 @@ export default function Home() {
   const [searchInput, setSearchInput] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("Semua");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [isDarkMode, setIsDarkMode] = useState(true); // Default true agar tetap cinematic di awal
+
+  useEffect(() => {
+    // Sinkronisasi dengan localStorage atau preference sistem jika ada
+    const savedTheme = localStorage.getItem("theme");
+    if (savedTheme) {
+      setIsDarkMode(savedTheme === "dark");
+    }
+  }, []);
+
+  const toggleDarkMode = () => {
+    setIsDarkMode((prev) => {
+      const nextTheme = !prev;
+      localStorage.setItem("theme", nextTheme ? "dark" : "light");
+      return nextTheme;
+    });
+  };
 
   // ── Fetch products ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -121,8 +141,20 @@ export default function Home() {
   // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <main className="min-h-screen overflow-hidden bg-black text-white">
+    <main className={`min-h-screen overflow-hidden transition-colors duration-500 ${isDarkMode ? "bg-black text-white" : "bg-[#f5f5f7] text-neutral-900"}`}>
       <Navbar />
+
+      <button
+        onClick={toggleDarkMode}
+        className={`fixed bottom-6 left-6 z-50 flex h-14 w-14 items-center justify-center rounded-full border shadow-2xl transition-all duration-300 hover:scale-110 ${
+          isDarkMode 
+            ? "border-white/10 bg-white/10 text-amber-400 backdrop-blur-xl hover:bg-white/20" 
+            : "border-black/10 bg-white text-indigo-600 hover:bg-neutral-100"
+        }`}
+        aria-label="Toggle Dark Mode"
+      >
+        {isDarkMode ? <Sun size={24} /> : <Moon size={24} />}
+      </button>
 
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <section className="relative min-h-screen overflow-hidden bg-black">
@@ -418,36 +450,116 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Experience Section ───────────────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-black px-6 py-28 text-white">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,#2563eb55_0%,transparent_35%),radial-gradient(circle_at_80%_60%,#9333ea55_0%,transparent_35%)]" />
+      {/* ── Offline Store, Contact & Socials Section ─────────────────────── */}
+      <section id="kontak" className={`relative overflow-hidden px-6 py-28 transition-colors duration-500 ${isDarkMode ? "bg-[#0b0b0c] text-white" : "bg-[#f5f5f7] text-black"}`}>
+        {/* Dynamic Background Glow */}
+        <div className={`absolute inset-0 transition-opacity duration-500 ${isDarkMode ? "opacity-100" : "opacity-20"}`}
+          style={{
+            backgroundImage: "radial-gradient(circle_at_30%_20%,#2563eb55_0%,transparent_35%), radial-gradient(circle_at_80%_60%,#9333ea55_0%,transparent_35%)"
+          }}
+        />
 
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-2">
+        <div className="relative mx-auto grid max-w-7xl items-start gap-12 lg:grid-cols-2">
+          {/* ── Kiri: Alamat Offline Store ── */}
           <div>
-            <p className="mb-4 text-sm font-black uppercase tracking-[0.35em] text-blue-300">
-              Markas Experience
+            <p className="mb-4 text-sm font-black uppercase tracking-[0.35em] text-blue-500">
+              Kunjungi Kami
             </p>
-            <h2 className="mb-6 text-6xl font-black leading-none tracking-[-0.07em] md:text-8xl">
-              Bukan cuma toko.
-              <br />
-              Ini experience.
+            <h2 className="mb-6 text-5xl font-black leading-none tracking-[-0.07em] md:text-7xl">
+              Offline Store & <br />
+              Markas Pusat.
             </h2>
-            <p className="max-w-xl text-lg leading-8 text-white/55">
-              UI premium, animasi halus, katalog rapi, checkout manual transfer,
-              dan database MySQL lokal dari XAMPP.
-            </p>
+            
+            <div className="space-y-4 max-w-xl text-lg leading-8">
+              <p className={isDarkMode ? "text-white/80 font-bold" : "text-neutral-900 font-bold"}>
+                📍 Markas iPhone Official Store
+              </p>
+              <p className={isDarkMode ? "text-white/55" : "text-neutral-500"}>
+                Jl. Utama No. 123, Lantai 2, Kota Jakarta Selatan, DKI Jakarta, 12345. <br />
+                (Samping Mall Premium Apple, Seberang Stasiun Kota).
+              </p>
+              <p className="text-sm font-bold text-blue-500">
+                Jam Operasional: Setiap Hari (10.00 - 22.00 WIB)
+              </p>
+            </div>
+
+            {/* Tombol Google Maps */}
+            <div className="mt-8">
+              <a
+                href="https://maps.google.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center gap-3 rounded-full border px-7 py-3.5 font-black text-sm backdrop-blur-xl transition-all duration-300 ${
+                  isDarkMode 
+                    ? "border-white/10 bg-white/5 text-white hover:bg-white/10" 
+                    : "border-black/10 bg-white text-neutral-900 hover:bg-neutral-50 shadow-sm"
+                }`}
+              >
+                Buka di Google Maps
+                <ArrowRight size={16} />
+              </a>
+            </div>
           </div>
 
+          {/* ── Kanan: Kontak & Sosial Media Box ── */}
           <motion.div
-            animate={{ rotate: [0, 2, -2, 0], y: [0, -16, 0] }}
-            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-            className="rounded-[50px] border border-white/10 bg-white/10 p-10 backdrop-blur-2xl"
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6 }}
+            className={`rounded-[40px] border p-8 md:p-10 backdrop-blur-2xl shadow-xl ${
+              isDarkMode ? "border-white/10 bg-white/5" : "border-black/5 bg-white"
+            }`}
           >
-            <img
-              src="https://store.storeimages.cdn-apple.com/8756/as-images.apple.com/is/macbook-air-13-m3-midnight-select-202402?wid=900&hei=900&fmt=png-alpha&.v=1708367688034"
-              alt="MacBook"
-              className="mx-auto max-h-[420px] object-contain drop-shadow-2xl"
-            />
+            {/* Kontak Person */}
+            <div className="mb-8">
+              <h3 className="mb-4 text-xl font-black tracking-tight">Hubungi Chat Admin</h3>
+              <p className={`mb-5 text-sm ${isDarkMode ? "text-white/55" : "text-neutral-500"}`}>
+                Punya pertanyaan sebelum membeli? Chat admin kami langsung via WhatsApp untuk respon cepat.
+              </p>
+              
+              <a
+                href="https://wa.me/6281234567890"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex w-full items-center justify-center gap-3 rounded-2xl bg-green-600 px-6 py-4 text-center font-black text-white transition hover:bg-green-500 hover:scale-[1.02] shadow-lg shadow-green-600/20"
+              >
+                Hubungi via WhatsApp
+              </a>
+            </div>
+
+            <hr className={`my-6 ${isDarkMode ? "border-white/10" : "border-black/10"}`} />
+
+            {/* Media Sosial */}
+            <div>
+              <h3 className="mb-4 text-xl font-black tracking-tight">Ikuti Media Sosial</h3>
+              <p className={`mb-5 text-sm ${isDarkMode ? "text-white/55" : "text-neutral-500"}`}>
+                Dapatkan info promo gadget Apple terbaru setiap harinya.
+              </p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <a
+                  href="https://instagram.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-bold transition ${
+                    isDarkMode ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-black/5 bg-neutral-50 hover:bg-neutral-100"
+                  }`}
+                >
+                  Instagram
+                </a>
+                <a
+                  href="https://tiktok.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex items-center justify-center gap-2 rounded-xl border py-3 text-sm font-bold transition ${
+                    isDarkMode ? "border-white/10 bg-white/5 hover:bg-white/10" : "border-black/5 bg-neutral-50 hover:bg-neutral-100"
+                  }`}
+                >
+                  TikTok
+                </a>
+              </div>
+            </div>
           </motion.div>
         </div>
       </section>

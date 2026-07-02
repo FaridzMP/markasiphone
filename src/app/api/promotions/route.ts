@@ -1,5 +1,7 @@
 import { db } from "../../../lib/db";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 type PromotionRow = {
   id: number;
   product_id: number;
@@ -9,36 +11,53 @@ type PromotionRow = {
   created_at: string;
   updated_at: string;
   product_name?: string;
-  product_slug?: string;
+  product_image?: string;
+  base_price?: number;
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isExpired(validUntil: string | null): boolean {
+  if (!validUntil) return false;
+  return new Date(validUntil).getTime() < Date.now();
+}
+
+// GET semua promo, lengkap dengan info produk terkait
 export async function GET() {
   try {
     const [rows] = await db.query(`
       SELECT
-        p.id,
-        p.product_id,
-        p.discount_percent,
-        p.is_active,
-        p.valid_until,
-        p.created_at,
-        p.updated_at,
-        pr.name AS product_name,
-        pr.slug AS product_slug
-      FROM promotions p
-      LEFT JOIN products pr ON pr.id = p.product_id
-      ORDER BY p.created_at DESC
+        promo.id,
+        promo.product_id,
+        promo.discount_percent,
+        promo.is_active,
+        promo.valid_until,
+        promo.created_at,
+        promo.updated_at,
+        p.name AS product_name,
+        p.image_url AS product_image,
+        p.base_price
+      FROM promotions promo
+      JOIN products p ON p.id = promo.product_id
+      ORDER BY promo.created_at DESC
     `);
 
-    return Response.json({ promotions: rows });
+    // Tandai status efektif (aktif tapi sudah lewat valid_until = dianggap expired)
+    const enriched = (rows as PromotionRow[]).map((row) => ({
+      ...row,
+      is_expired: isExpired(row.valid_until),
+    }));
+
+    return Response.json(enriched);
   } catch (error) {
     return Response.json(
-      { message: "Gagal mengambil promo", error: String(error) },
+      { message: "Gagal mengambil data promosi", error: String(error) },
       { status: 500 }
     );
   }
 }
 
+// POST tambah promo baru
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -46,105 +65,110 @@ export async function POST(request: Request) {
 
     if (!product_id || !discount_percent) {
       return Response.json(
-        { message: "product_id dan discount_percent wajib diisi" },
+        { message: "Produk dan persentase diskon wajib diisi" },
         { status: 400 }
       );
     }
 
-    const pct = Number(discount_percent);
-    if (pct < 1 || pct > 99) {
+    if (discount_percent <= 0 || discount_percent > 90) {
       return Response.json(
-        { message: "discount_percent harus antara 1-99" },
+        { message: "Diskon harus antara 1% - 90%" },
         { status: 400 }
       );
     }
 
-    if (valid_until) {
-      const vt = new Date(valid_until);
-      if (isNaN(vt.getTime()) || vt <= new Date()) {
-        return Response.json(
-          { message: "valid_until tidak boleh masa lalu" },
-          { status: 400 }
-        );
-      }
-    }
-
-    const [existing] = await db.query(
-      `SELECT id FROM promotions WHERE product_id = ? AND is_active = 1`,
+    // Pastikan produk ada
+    const [productRows]: any = await db.query(
+      `SELECT id FROM products WHERE id = ? LIMIT 1`,
       [product_id]
     );
-    if ((existing as any[]).length > 0) {
+    if (productRows.length === 0) {
+      return Response.json({ message: "Produk tidak ditemukan" }, { status: 404 });
+    }
+
+    // Enforce: 1 produk maksimal 1 promo aktif.
+    // Kalau sudah ada promo aktif untuk produk ini, nonaktifkan dulu sebelum buat yang baru.
+    const [existingActive]: any = await db.query(
+      `SELECT id FROM promotions WHERE product_id = ? AND is_active = 1 LIMIT 1`,
+      [product_id]
+    );
+    if (existingActive.length > 0) {
       return Response.json(
-        { message: "Produk ini sudah memiliki promo aktif" },
-        { status: 400 }
+        { message: "Produk ini sudah punya promo aktif. Nonaktifkan promo lama dulu sebelum menambah yang baru." },
+        { status: 409 }
       );
     }
 
     await db.query(
-      `INSERT INTO promotions (product_id, discount_percent, is_active, valid_until) VALUES (?, ?, 1, ?)`,
-      [product_id, pct, valid_until || null]
+      `
+      INSERT INTO promotions (product_id, discount_percent, valid_until, is_active)
+      VALUES (?, ?, ?, 1)
+      `,
+      [product_id, Number(discount_percent), valid_until || null]
     );
 
     return Response.json({ message: "Promo berhasil ditambahkan" });
   } catch (error) {
     return Response.json(
-      { message: "Gagal menambah promo", error: String(error) },
+      { message: "Gagal menambahkan promo", error: String(error) },
       { status: 500 }
     );
   }
 }
 
+// PATCH update promo (ubah persen, tanggal, atau toggle aktif/nonaktif)
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const { id, discount_percent, is_active, valid_until } = body;
+    const { id, discount_percent, valid_until, is_active } = body;
 
     if (!id) {
       return Response.json({ message: "ID promo wajib ada" }, { status: 400 });
     }
 
-    if (discount_percent !== undefined) {
-      const pct = Number(discount_percent);
-      if (pct < 1 || pct > 99) {
+    const [existingRows]: any = await db.query(
+      `SELECT * FROM promotions WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    if (existingRows.length === 0) {
+      return Response.json({ message: "Promo tidak ditemukan" }, { status: 404 });
+    }
+    const existing = existingRows[0];
+
+    // Kalau sedang mengaktifkan promo ini, pastikan tidak ada promo aktif lain untuk produk yang sama
+    if (is_active === true || is_active === 1) {
+      const [otherActive]: any = await db.query(
+        `SELECT id FROM promotions WHERE product_id = ? AND is_active = 1 AND id != ? LIMIT 1`,
+        [existing.product_id, id]
+      );
+      if (otherActive.length > 0) {
         return Response.json(
-          { message: "discount_percent harus antara 1-99" },
-          { status: 400 }
+          { message: "Produk ini sudah punya promo aktif lain. Nonaktifkan dulu sebelum mengaktifkan promo ini." },
+          { status: 409 }
         );
       }
     }
 
-    if (valid_until !== undefined && valid_until !== null) {
-      const vt = new Date(valid_until);
-      if (isNaN(vt.getTime()) || vt <= new Date()) {
-        return Response.json(
-          { message: "valid_until tidak boleh masa lalu" },
-          { status: 400 }
-        );
-      }
+    if (discount_percent !== undefined && (discount_percent <= 0 || discount_percent > 90)) {
+      return Response.json({ message: "Diskon harus antara 1% - 90%" }, { status: 400 });
     }
 
-    const fields: string[] = [];
-    const values: any[] = [];
-
-    if (discount_percent !== undefined) {
-      fields.push("discount_percent = ?");
-      values.push(Number(discount_percent));
-    }
-    if (is_active !== undefined) {
-      fields.push("is_active = ?");
-      values.push(Number(is_active));
-    }
-    if (valid_until !== undefined) {
-      fields.push("valid_until = ?");
-      values.push(valid_until);
-    }
-
-    if (fields.length === 0) {
-      return Response.json({ message: "Tidak ada field yang diupdate" }, { status: 400 });
-    }
-
-    values.push(id);
-    await db.query(`UPDATE promotions SET ${fields.join(", ")} WHERE id = ?`, values);
+    await db.query(
+      `
+      UPDATE promotions
+      SET
+        discount_percent = COALESCE(?, discount_percent),
+        valid_until = ?,
+        is_active = COALESCE(?, is_active)
+      WHERE id = ?
+      `,
+      [
+        discount_percent !== undefined ? Number(discount_percent) : null,
+        valid_until !== undefined ? (valid_until || null) : existing.valid_until,
+        is_active !== undefined ? (is_active ? 1 : 0) : null,
+        id,
+      ]
+    );
 
     return Response.json({ message: "Promo berhasil diupdate" });
   } catch (error) {
@@ -155,6 +179,7 @@ export async function PATCH(request: Request) {
   }
 }
 
+// DELETE hapus promo
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -164,7 +189,7 @@ export async function DELETE(request: Request) {
       return Response.json({ message: "ID promo wajib ada" }, { status: 400 });
     }
 
-    await db.query("DELETE FROM promotions WHERE id = ?", [id]);
+    await db.query(`DELETE FROM promotions WHERE id = ?`, [id]);
 
     return Response.json({ message: "Promo berhasil dihapus" });
   } catch (error) {

@@ -14,7 +14,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Navbar from "../../components/Navbar";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
@@ -51,9 +51,25 @@ function ToastContainer({ toasts }: { toasts: Toast[] }) {
   );
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ─── Fallback saat checkout content masih di-load (dipakai Suspense) ─────────
 
-export default function CheckoutPage() {
+function CheckoutSkeleton() {
+  return (
+    <main className="min-h-screen bg-black text-white">
+      <Navbar />
+      <section className="relative z-10 mx-auto max-w-7xl px-6 py-32">
+        <div className="grid gap-8 lg:grid-cols-2">
+          <div className="h-[600px] animate-pulse rounded-[42px] border border-white/10 bg-white/5" />
+          <div className="h-[600px] animate-pulse rounded-[42px] border border-white/10 bg-white/5" />
+        </div>
+      </section>
+    </main>
+  );
+}
+
+// ─── Konten checkout — komponen inilah yang memakai useSearchParams() ────────
+
+function CheckoutContent() {
   const searchParams = useSearchParams();
 
   const produk = searchParams.get("produk") || "Produk Apple";
@@ -110,9 +126,9 @@ export default function CheckoutPage() {
 
       const res = await fetch("/api/orders", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-         },
+        },
         body: JSON.stringify({
           customer_name: form.customer_name,
           customer_email: form.customer_email,
@@ -130,7 +146,7 @@ export default function CheckoutPage() {
         return;
       }
 
-      showToast("Pesanan berhasil dibuat! Mengalihkan ke WhatsApp…", "success");
+      showToast("Pesanan berhasil dibuat! Mengalihkan ke WhatsApp...", "success");
 
       const waText = encodeURIComponent(`Halo Admin Markas iPhone,
 
@@ -365,5 +381,16 @@ Saya akan mengirim bukti transfer di chat ini.`);
         </div>
       </section>
     </main>
+  );
+}
+
+// ─── Default export — wajib dibungkus Suspense karena CheckoutContent ───────
+// ─── memakai useSearchParams(), jika tidak Next.js akan gagal build (CSR bailout) ───
+
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={<CheckoutSkeleton />}>
+      <CheckoutContent />
+    </Suspense>
   );
 }
